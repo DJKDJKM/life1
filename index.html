@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Evolving Ecosystem</title>
+<style>
+  :root {
+    --bg: #0a0e0a;
+    --panel: #141a14;
+    --panel-2: #1b231b;
+    --ink: #d7e4d7;
+    --muted: #7c8c7c;
+    --plant: #4caf50;
+    --herb: #5b9bd5;
+    --pred: #e05a5a;
+    --accent: #9cdb6b;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--ink);
+    font-family: "Segoe UI", system-ui, sans-serif;
+    overflow: hidden;
+  }
+  #app { display: flex; height: 100vh; }
+  #stage {
+    flex: 1; position: relative;
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 40%, #0f160f 0%, #070a07 100%);
+  }
+  canvas#world {
+    background: #0c120c;
+    box-shadow: 0 0 40px rgba(0,0,0,0.6) inset, 0 0 0 1px #1d271d;
+    border-radius: 6px;
+    cursor: crosshair;
+  }
+  #panel {
+    width: 320px; flex-shrink: 0;
+    background: var(--panel);
+    border-left: 1px solid #1d271d;
+    padding: 16px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  h1 { font-size: 18px; margin: 0; letter-spacing: 0.5px; }
+  h1 small { display: block; font-size: 11px; color: var(--muted); font-weight: 400; margin-top: 2px; }
+  .card { background: var(--panel-2); border: 1px solid #232f23; border-radius: 8px; padding: 12px; }
+  .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 0 0 10px; }
+  .row { display: flex; gap: 8px; }
+  button {
+    flex: 1; background: #233023; color: var(--ink); border: 1px solid #2f402f;
+    padding: 8px; border-radius: 6px; cursor: pointer; font-size: 13px;
+    transition: background .12s;
+  }
+  button:hover { background: #2d3d2d; }
+  button.primary { background: #2f5a2f; border-color: #3d743d; }
+  button.primary:hover { background: #3a6e3a; }
+  label.slider { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  label.slider span { color: var(--accent); float: right; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .stat { text-align: center; }
+  .stat .num { font-size: 22px; font-weight: 700; line-height: 1; }
+  .stat .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-top: 4px; }
+  .stat.plant .num { color: var(--plant); }
+  .stat.herb .num { color: var(--herb); }
+  .stat.pred .num { color: var(--pred); }
+  .traits { font-size: 12px; }
+  .traits .trow { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px dashed #1f2a1f; }
+  .traits .trow:last-child { border: 0; }
+  .traits .tval { color: var(--accent); font-variant-numeric: tabular-nums; }
+  canvas#chart { width: 100%; height: 90px; display: block; background: #0c120c; border-radius: 6px; }
+  .legend { display: flex; gap: 14px; font-size: 11px; color: var(--muted); margin-top: 6px; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+  .hint { font-size: 11px; color: var(--muted); line-height: 1.5; }
+  .gen { font-size: 12px; color: var(--muted); }
+  .gen b { color: var(--accent); }
+  .toggle { display: flex; align-items: center; justify-content: space-between; font-size: 12px; padding: 6px 0; }
+  .toggle span { color: var(--ink); }
+  .toggle small { display:block; color: var(--muted); font-size: 10px; margin-top: 1px; }
+  .sw { position: relative; width: 38px; height: 20px; flex-shrink: 0; }
+  .sw input { opacity: 0; width: 0; height: 0; }
+  .sw .track { position: absolute; inset: 0; background: #2a382a; border-radius: 20px; transition: .15s; cursor: pointer; }
+  .sw .track:before { content:""; position:absolute; width:14px; height:14px; left:3px; top:3px; background:#7c8c7c; border-radius:50%; transition:.15s; }
+  .sw input:checked + .track { background: #2f5a2f; }
+  .sw input:checked + .track:before { transform: translateX(18px); background: var(--accent); }
+  .log { font-size: 11px; line-height: 1.6; max-height: 120px; overflow-y: auto; font-variant-numeric: tabular-nums; }
+  .log .e { color: var(--muted); }
+  .log .e b { color: var(--ink); font-weight: 600; }
+  .log .e.warn b { color: var(--pred); }
+  .log .e.good b { color: var(--accent); }
+  .ministats { display:grid; grid-template-columns:1fr 1fr; gap:4px 12px; font-size:12px; margin-top:8px; }
+  .ministats .ms { display:flex; justify-content:space-between; }
+  .ministats .ms span:last-child { color: var(--accent); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage"><canvas id="world"></canvas></div>
+  <div id="panel">
+    <h1>Evolving Ecosystem<small>plants · herbivores · predators · natural selection</small></h1>
+
+    <div class="card">
+      <div class="row">
+        <button id="btnPause" class="primary">Pause</button>
+        <button id="btnReset">Reset</button>
+      </div>
+      <label class="slider">Sim speed <span id="speedVal">1×</span>
+        <input type="range" id="speed" min="1" max="8" value="1" step="1"></label>
+      <div class="row" style="margin-top:6px">
+        <button id="addHerb">+ Herbivores</button>
+        <button id="addPred">+ Predators</button>
+      </div>
+      <div class="hint" style="margin-top:8px">Click the world to drop food. Hover a creature to inspect.</div>
+      <div class="toggle"><span>Neural brains<small>evolve tiny networks instead of fixed rules</small></span>
+        <label class="sw"><input type="checkbox" id="brainMode"><span class="track"></span></label></div>
+      <div class="toggle"><span>Color by species<small>hue from genome — watch clusters split</small></span>
+        <label class="sw"><input type="checkbox" id="speciesColor" checked><span class="track"></span></label></div>
+      <div class="toggle"><span>Day / night cycle<small>plants grow faster by day</small></span>
+        <label class="sw"><input type="checkbox" id="dayNight" checked><span class="track"></span></label></div>
+      <div class="row" style="margin-top:6px">
+        <button id="btnSave">Save</button>
+        <button id="btnLoad">Load</button>
+        <input type="file" id="loadFile" accept="application/json" style="display:none">
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Population</h2>
+      <div class="stats">
+        <div class="stat plant"><div class="num" id="nPlant">0</div><div class="lbl">Plants</div></div>
+        <div class="stat herb"><div class="num" id="nHerb">0</div><div class="lbl">Herbivores</div></div>
+        <div class="stat pred"><div class="num" id="nPred">0</div><div class="lbl">Predators</div></div>
+      </div>
+      <div class="gen" style="margin-top:10px">Generation <b id="gen">0</b> · Tick <b id="tick">0</b></div>
+      <div class="ministats">
+        <div class="ms"><span>Births</span><span id="msBirths">0</span></div>
+        <div class="ms"><span>Deaths</span><span id="msDeaths">0</span></div>
+        <div class="ms"><span>Kills</span><span id="msKills">0</span></div>
+        <div class="ms"><span>Oldest</span><span id="msOldest">0</span></div>
+        <div class="ms"><span>Peak herb</span><span id="msPeakH">0</span></div>
+        <div class="ms"><span>Peak pred</span><span id="msPeakP">0</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Event log</h2>
+      <div class="log" id="log"></div>
+    </div>
+
+    <div class="card">
+      <h2>Population over time</h2>
+      <canvas id="chart"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--plant)"></i>Plants</span>
+        <span><i style="background:var(--herb)"></i>Herbivores</span>
+        <span><i style="background:var(--pred)"></i>Predators</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 id="traitTitle">Average traits — herbivores</h2>
+      <div class="traits" id="herbTraits"></div>
+    </div>
+    <div class="card">
+      <h2>Average traits — predators</h2>
+      <div class="traits" id="predTraits"></div>
+    </div>
+
+    <div class="card" id="inspectCard" style="display:none">
+      <h2 id="inspTitle">Inspecting</h2>
+      <div class="traits" id="inspTraits"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------- Config ----------
+const CFG = {
+  plantStart: 120,
+  herbStart: 40,
+  predStart: 8,
+  plantGrowRate: 2.2,     // expected new plants per tick
+  plantMax: 550,
+  plantEnergy: 26,
+  herbStartEnergy: 90,
+  predStartEnergy: 140,
+  reproThreshHerb: 150,
+  reproThreshPred: 230,
+  maxAgeHerb: 2600,
+  maxAgePred: 3200,
+  mutationRate: 0.12,     // chance each gene mutates
+  mutationAmount: 0.18,   // relative magnitude of a mutation
+  dayLength: 1400,        // ticks per full day/night cycle
+};
+
+// Neural brain shape: inputs -> hidden -> outputs
+const NN = { in: 8, hid: 6, out: 2 };
+const NN_LEN = NN.in * NN.hid + NN.hid * NN.out;
+
+// ---------- World ----------
+const world = document.getElementById('world');
+const ctx = world.getContext('2d');
+let W = 0, H = 0;
+function fitCanvas() {
+  const stage = document.getElementById('stage');
+  const pad = 24;
+  const aw = stage.clientWidth - pad, ah = stage.clientHeight - pad;
+  // keep roughly 4:3 but fill available space
+  W = Math.max(400, Math.floor(aw));
+  H = Math.max(300, Math.floor(ah));
+  world.width = W; world.height = H;
+  world.style.width = W + 'px'; world.style.height = H + 'px';
+}
+
+// ---------- Utils ----------
+const rnd = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const dist2 = (ax, ay, bx, by) => { const dx = ax - bx, dy = ay - by; return dx*dx + dy*dy; };
+
+// ---------- Genome ----------
+// Genes are positive scalars normalized around 1.0 where sensible.
+function randomBrain() {
+  const w = new Float32Array(NN_LEN);
+  for (let i = 0; i < NN_LEN; i++) w[i] = rnd(-1, 1);
+  return w;
+}
+// Two hidden-layer pass; inputs normalized roughly -1..1. Returns [turn, speed].
+function think(brain, inp) {
+  const hid = new Float32Array(NN.hid);
+  for (let j = 0; j < NN.hid; j++) {
+    let s = 0;
+    for (let i = 0; i < NN.in; i++) s += inp[i] * brain[i * NN.hid + j];
+    hid[j] = Math.tanh(s);
+  }
+  const off = NN.in * NN.hid;
+  const out = [0, 0];
+  for (let k = 0; k < NN.out; k++) {
+    let s = 0;
+    for (let j = 0; j < NN.hid; j++) s += hid[j] * brain[off + j * NN.out + k];
+    out[k] = Math.tanh(s);
+  }
+  return out;
+}
+
+function randomGenome(kind) {
+  return {
+    speed:      rnd(0.7, 1.4),   // movement speed multiplier
+    size:       rnd(0.7, 1.3),   // body size: bigger = more energy store, slower, costs more
+    vision:     rnd(0.6, 1.5),   // perception radius multiplier
+    metabolism: rnd(0.8, 1.2),   // energy burn rate
+    aggression: kind === 'pred' ? rnd(0.6, 1.3) : rnd(0.0, 0.4), // hunt drive / boldness
+    brain:      randomBrain(),
+  };
+}
+function mutate(g) {
+  const out = {};
+  for (const k in g) {
+    if (k === 'brain') continue;
+    let v = g[k];
+    if (Math.random() < CFG.mutationRate) {
+      v += v * rnd(-CFG.mutationAmount, CFG.mutationAmount) + rnd(-0.03, 0.03);
+    }
+    out[k] = clamp(v, 0.05, 3.0);
+  }
+  const b = new Float32Array(NN_LEN);
+  for (let i = 0; i < NN_LEN; i++) {
+    b[i] = g.brain[i];
+    if (Math.random() < CFG.mutationRate) b[i] = clamp(b[i] + rnd(-0.35, 0.35), -4, 4);
+  }
+  out.brain = b;
+  return out;
+}
+
+// ---------- Entities ----------
+let plants = [], herbs = [], preds = [];
+let tick = 0, generation = 0, paused = false, simSpeed = 1;
+let nextId = 1;
+let brainMode = false, speciesColor = true, dayNightOn = true;
+let stats = { births: 0, deaths: 0, kills: 0, oldest: 0, peakH: 0, peakP: 0 };
+let events = [];
+let lastHerbAlive = true, lastPredAlive = true, lastGenLogged = 0;
+
+function makePlant() {
+  return { x: rnd(8, W-8), y: rnd(8, H-8), e: CFG.plantEnergy, r: 3 };
+}
+
+function makeCreature(kind, x, y, genome, energy, gen) {
+  const g = genome || randomGenome(kind);
+  return {
+    id: nextId++,
+    kind, x, y,
+    vx: rnd(-1,1), vy: rnd(-1,1),
+    g,
+    e: energy,
+    age: 0,
+    gen: gen || 0,
+    dir: rnd(0, Math.PI*2),
+    spdFactor: 1,
+  };
+}
+
+function seed() {
+  plants = []; herbs = []; preds = [];
+  tick = 0; generation = 0;
+  stats = { births: 0, deaths: 0, kills: 0, oldest: 0, peakH: 0, peakP: 0 };
+  events = []; lastHerbAlive = true; lastPredAlive = true; lastGenLogged = 0;
+  for (let i=0;i<CFG.plantStart;i++) plants.push(makePlant());
+  for (let i=0;i<CFG.herbStart;i++) herbs.push(makeCreature('herb', rnd(0,W), rnd(0,H), null, CFG.herbStartEnergy));
+  for (let i=0;i<CFG.predStart;i++) preds.push(makeCreature('pred', rnd(0,W), rnd(0,H), null, CFG.predStartEnergy));
+  history.length = 0;
+  addEvent('World seeded', 'good');
+}
+
+// Derived stats from genome
+function radius(c)  { return 3 + c.g.size * 3; }
+function maxSpeed(c){ return (c.kind==='pred' ? 1.7 : 1.5) * c.g.speed / (0.6 + c.g.size*0.5); }
+function visionR(c) { return (c.kind==='pred' ? 90 : 70) * c.g.vision; }
+function burn(c)    { const sp = maxSpeed(c); return (0.04 + c.g.size*0.05 + sp*sp*0.02) * c.g.metabolism; }
+function reproThresh(c){ return c.kind==='pred' ? CFG.reproThreshPred : CFG.reproThreshHerb; }
+function maxAge(c)  { return c.kind==='pred' ? CFG.maxAgePred : CFG.maxAgeHerb; }
+
+// Day/night: 1.0 at midday, ~0.15 at midnight
+function dayFactor() {
+  if (!dayNightOn) return 1;
+  const phase = (tick % CFG.dayLength) / CFG.dayLength; // 0..1
+  return 0.15 + 0.85 * (0.5 - 0.5 * Math.cos(phase * Math.PI * 2));
+}
+function isNight() { return dayFactor() < 0.4; }
+
+function addEvent(text, cls) {
+  events.unshift({ t: tick, text, cls: cls || '' });
+  if (events.length > 40) events.pop();
+}
+
+// Map genome to a stable HSL color so similar genomes look alike.
+function genomeColor(c) {
+  const g = c.g;
+  const hueBase = c.kind === 'pred' ? 0 : 200; // reds vs blues
+  const h = (hueBase + (g.speed * 40 + g.vision * 30 + g.aggression * 50)) % 360;
+  const l = clamp(38 + g.size * 18, 30, 72);
+  const s = clamp(45 + g.metabolism * 18, 40, 85);
+  return `hsl(${h.toFixed(0)} ${s.toFixed(0)}% ${l.toFixed(0)}%)`;
+}
+
+// Steering: move toward target (tx,ty) or away if flee
+function steer(c, tx, ty, flee) {
+  let dx = tx - c.x, dy = ty - c.y;
+  if (flee) { dx = -dx; dy = -dy; }
+  c.dir = Math.atan2(dy, dx);
+  c.spdFactor = 1;
+}
+
+// Neural steering. attract = thing to go toward, avoid = thing to flee.
+function brainSteer(c, attract, avoid) {
+  const vr = visionR(c);
+  const inp = new Array(NN.in).fill(0);
+  if (attract) {
+    const dx = attract.x - c.x, dy = attract.y - c.y, d = Math.hypot(dx, dy) || 1;
+    inp[0] = dx / d; inp[1] = dy / d; inp[2] = 1 - clamp(d / vr, 0, 1);
+  }
+  if (avoid) {
+    const dx = avoid.x - c.x, dy = avoid.y - c.y, d = Math.hypot(dx, dy) || 1;
+    inp[3] = dx / d; inp[4] = dy / d; inp[5] = 1 - clamp(d / vr, 0, 1);
+  }
+  inp[6] = clamp(c.e / reproThresh(c), 0, 1) * 2 - 1;
+  inp[7] = 1; // bias
+  const [turn, spd] = think(c.g.brain, inp);
+  c.dir += turn * 0.6;
+  c.spdFactor = (spd + 1) * 0.5; // 0..1
+}
+
+function wander(c) {
+  c.dir += rnd(-0.4, 0.4);
+  c.spdFactor = 0.7;
+}
+
+function move(c) {
+  const sf = clamp(c.spdFactor == null ? 1 : c.spdFactor, 0, 1);
+  const sp = maxSpeed(c) * (0.25 + 0.75 * sf); // never fully stop while alive
+  c.x += Math.cos(c.dir) * sp;
+  c.y += Math.sin(c.dir) * sp;
+  // wrap-around toroidal world keeps things lively
+  if (c.x < 0) c.x += W; if (c.x > W) c.x -= W;
+  if (c.y < 0) c.y += H; if (c.y > H) c.y -= H;
+  // energy cost scales with how hard it actually moved
+  c.e -= burn(c) * (0.4 + 0.6 * sf);
+  c.age++;
+}
+
+function nearestPlant(c, r2) {
+  let best = null, bd = r2;
+  for (const p of plants) {
+    const d = dist2(c.x, c.y, p.x, p.y);
+    if (d < bd) { bd = d; best = p; }
+  }
+  return best;
+}
+function nearest(c, arr, r2) {
+  let best = null, bd = r2;
+  for (const o of arr) {
+    if (o === c) continue;
+    const d = dist2(c.x, c.y, o.x, o.y);
+    if (d < bd) { bd = d; best = o; }
+  }
+  return best;
+}
+
+function reproduce(c, list) {
+  c.e *= 0.5;
+  const child = makeCreature(c.kind, c.x + rnd(-6,6), c.y + rnd(-6,6), mutate(c.g), c.e, c.gen + 1);
+  list.push(child);
+  stats.births++;
+  if (child.gen > generation) {
+    generation = child.gen;
+    if (generation % 10 === 0 && generation !== lastGenLogged) {
+      lastGenLogged = generation;
+      addEvent(`Generation ${generation} reached`, 'good');
+    }
+  }
+}
+
+// ---------- Step ----------
+function step() {
+  tick++;
+
+  // Plants grow (faster by day). Rate can exceed 1/tick: integer part spawns
+  // guaranteed, fractional part is the chance of one more.
+  let toGrow = CFG.plantGrowRate * dayFactor();
+  while (toGrow > 0 && plants.length < CFG.plantMax) {
+    if (toGrow < 1 && Math.random() >= toGrow) break;
+    toGrow -= 1;
+    // sometimes sprout near an existing plant (clustering), sometimes random
+    if (plants.length && Math.random() < 0.6) {
+      const p = plants[(Math.random()*plants.length)|0];
+      plants.push({ x: clamp(p.x+rnd(-30,30),4,W-4), y: clamp(p.y+rnd(-30,30),4,H-4), e: CFG.plantEnergy, r: 3 });
+    } else {
+      plants.push(makePlant());
+    }
+  }
+
+  // Herbivores
+  for (let i = herbs.length - 1; i >= 0; i--) {
+    const c = herbs[i];
+    const vr = visionR(c), vr2 = vr*vr;
+    // flee nearest predator first
+    const threat = nearest(c, preds, vr2);
+    const food = nearestPlant(c, vr2);
+    if (brainMode) {
+      brainSteer(c, food, threat);
+    } else if (threat) {
+      steer(c, threat.x, threat.y, true);
+    } else if (food) {
+      steer(c, food.x, food.y, false);
+    } else {
+      wander(c);
+    }
+    move(c);
+
+    // eat plants within body radius
+    const er = radius(c) + 4, er2 = er*er;
+    for (let j = plants.length - 1; j >= 0; j--) {
+      if (dist2(c.x, c.y, plants[j].x, plants[j].y) < er2) {
+        c.e += plants[j].e;
+        plants.splice(j, 1);
+      }
+    }
+    // reproduce / die
+    if (c.e > reproThresh(c)) reproduce(c, herbs);
+    if (c.e <= 0 || c.age > maxAge(c)) { if (c.age > stats.oldest) stats.oldest = c.age; herbs.splice(i, 1); stats.deaths++; }
+  }
+
+  // Predators
+  for (let i = preds.length - 1; i >= 0; i--) {
+    const c = preds[i];
+    const vr = visionR(c), vr2 = vr*vr;
+    const prey = nearest(c, herbs, vr2);
+    if (brainMode) brainSteer(c, prey, null);
+    else if (prey) steer(c, prey.x, prey.y, false);
+    else wander(c);
+    move(c);
+
+    const er = radius(c) + 5, er2 = er*er;
+    for (let j = herbs.length - 1; j >= 0; j--) {
+      if (dist2(c.x, c.y, herbs[j].x, herbs[j].y) < er2) {
+        c.e += herbs[j].e * 0.6 + 40;
+        herbs.splice(j, 1);
+        stats.kills++; stats.deaths++;
+        break; // one kill per tick
+      }
+    }
+    if (c.e > reproThresh(c)) reproduce(c, preds);
+    if (c.e <= 0 || c.age > maxAge(c)) { if (c.age > stats.oldest) stats.oldest = c.age; preds.splice(i, 1); stats.deaths++; }
+  }
+
+  // Track peaks + extinction / recovery events
+  if (herbs.length > stats.peakH) stats.peakH = herbs.length;
+  if (preds.length > stats.peakP) stats.peakP = preds.length;
+  const herbAlive = herbs.length > 0, predAlive = preds.length > 0;
+  if (lastHerbAlive && !herbAlive) addEvent('Herbivores went extinct', 'warn');
+  if (!lastHerbAlive && herbAlive) addEvent('Herbivores recovered', 'good');
+  if (lastPredAlive && !predAlive) addEvent('Predators went extinct', 'warn');
+  if (!lastPredAlive && predAlive) addEvent('Predators recovered', 'good');
+  lastHerbAlive = herbAlive; lastPredAlive = predAlive;
+
+  recordHistory();
+}
+
+// ---------- History / chart ----------
+const history = [];
+const HIST_MAX = 240;
+function recordHistory() {
+  if (tick % 4 !== 0) return;
+  history.push({ p: plants.length, h: herbs.length, r: preds.length });
+  if (history.length > HIST_MAX) history.shift();
+}
+
+const chart = document.getElementById('chart');
+const cctx = chart.getContext('2d');
+function drawChart() {
+  const w = chart.width = chart.clientWidth, h = chart.height = 90;
+  cctx.clearRect(0,0,w,h);
+  if (history.length < 2) return;
+  const maxP = Math.max(10, ...history.map(d=>d.p));
+  const maxC = Math.max(5, ...history.map(d=>Math.max(d.h,d.r)));
+  const line = (key, max, color) => {
+    cctx.beginPath();
+    for (let i=0;i<history.length;i++){
+      const x = i/(HIST_MAX-1)*w;
+      const y = h - history[i][key]/max*(h-6) - 3;
+      i===0 ? cctx.moveTo(x,y) : cctx.lineTo(x,y);
+    }
+    cctx.strokeStyle = color; cctx.lineWidth = 1.5; cctx.stroke();
+  };
+  line('p', maxP, '#4caf50');
+  line('h', maxC, '#5b9bd5');
+  line('r', maxC, '#e05a5a');
+}
+
+// ---------- Render ----------
+let hoverCreature = null;
+function draw() {
+  ctx.clearRect(0,0,W,H);
+
+  // plants
+  ctx.fillStyle = '#3f9b43';
+  for (const p of plants) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 2.2, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // creatures
+  drawCreatures(herbs, '#5b9bd5');
+  drawCreatures(preds, '#e05a5a');
+
+  // day/night overlay (drawn over everything but the panel)
+  if (dayNightOn) {
+    const dark = (1 - dayFactor()) * 0.55;
+    if (dark > 0.01) {
+      ctx.fillStyle = `rgba(8,14,32,${dark.toFixed(3)})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  // hover ring + vision
+  if (hoverCreature) {
+    const c = hoverCreature;
+    ctx.strokeStyle = 'rgba(156,219,107,0.5)';
+    ctx.setLineDash([4,4]);
+    ctx.beginPath(); ctx.arc(c.x, c.y, visionR(c), 0, Math.PI*2); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = '#9cdb6b'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(c.x, c.y, radius(c)+4, 0, Math.PI*2); ctx.stroke();
+  }
+}
+
+function drawCreatures(arr, body) {
+  for (const c of arr) {
+    const r = radius(c);
+    // energy fades alpha
+    const alpha = clamp(0.35 + c.e/reproThresh(c)*0.65, 0.35, 1);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = speciesColor ? genomeColor(c) : body;
+    ctx.save();
+    ctx.translate(c.x, c.y);
+    ctx.rotate(c.dir);
+    ctx.beginPath();
+    // little arrow-ish body
+    ctx.moveTo(r+2, 0);
+    ctx.lineTo(-r, r*0.8);
+    ctx.lineTo(-r*0.5, 0);
+    ctx.lineTo(-r, -r*0.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ---------- UI ----------
+const $ = id => document.getElementById(id);
+function avgTraits(arr) {
+  if (!arr.length) return null;
+  const sum = { speed:0,size:0,vision:0,metabolism:0,aggression:0 };
+  for (const c of arr) for (const k in sum) sum[k] += c.g[k];
+  for (const k in sum) sum[k] /= arr.length;
+  return sum;
+}
+function renderTraits(el, t) {
+  if (!t) { el.innerHTML = '<div class="trow"><span>—</span><span class="tval">extinct</span></div>'; return; }
+  el.innerHTML = Object.entries(t).map(([k,v]) =>
+    `<div class="trow"><span>${k}</span><span class="tval">${v.toFixed(2)}</span></div>`).join('');
+}
+
+function updatePanel() {
+  $('nPlant').textContent = plants.length;
+  $('nHerb').textContent = herbs.length;
+  $('nPred').textContent = preds.length;
+  $('gen').textContent = generation;
+  $('tick').textContent = tick;
+  $('msBirths').textContent = stats.births;
+  $('msDeaths').textContent = stats.deaths;
+  $('msKills').textContent = stats.kills;
+  $('msOldest').textContent = stats.oldest;
+  $('msPeakH').textContent = stats.peakH;
+  $('msPeakP').textContent = stats.peakP;
+  $('log').innerHTML = events.map(e =>
+    `<div class="e ${e.cls}">t${e.t} · <b>${e.text}</b></div>`).join('');
+  renderTraits($('herbTraits'), avgTraits(herbs));
+  renderTraits($('predTraits'), avgTraits(preds));
+  drawChart();
+
+  if (hoverCreature && (herbs.includes(hoverCreature) || preds.includes(hoverCreature))) {
+    const c = hoverCreature;
+    $('inspectCard').style.display = 'block';
+    $('inspTitle').textContent = `${c.kind === 'pred' ? 'Predator' : 'Herbivore'} #${c.id} (gen ${c.gen})`;
+    const rows = [
+      ['energy', c.e.toFixed(0)],
+      ['age', c.age],
+      ['speed', c.g.speed.toFixed(2)],
+      ['size', c.g.size.toFixed(2)],
+      ['vision', c.g.vision.toFixed(2)],
+      ['metabolism', c.g.metabolism.toFixed(2)],
+      ['aggression', c.g.aggression.toFixed(2)],
+    ];
+    $('inspTraits').innerHTML = rows.map(([k,v]) =>
+      `<div class="trow"><span>${k}</span><span class="tval">${v}</span></div>`).join('');
+  } else {
+    $('inspectCard').style.display = 'none';
+  }
+}
+
+// ---------- Loop ----------
+function frame() {
+  if (!paused) {
+    for (let s = 0; s < simSpeed; s++) step();
+  }
+  draw();
+  updatePanel();
+  requestAnimationFrame(frame);
+}
+
+// ---------- Interaction ----------
+world.addEventListener('mousemove', e => {
+  const rect = world.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  let best = null, bd = 200;
+  for (const c of herbs.concat(preds)) {
+    const d = dist2(mx, my, c.x, c.y);
+    if (d < bd) { bd = d; best = c; }
+  }
+  hoverCreature = best;
+});
+world.addEventListener('mouseleave', () => hoverCreature = null);
+world.addEventListener('click', e => {
+  const rect = world.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  for (let i=0;i<8;i++) plants.push({ x: clamp(mx+rnd(-20,20),4,W-4), y: clamp(my+rnd(-20,20),4,H-4), e: CFG.plantEnergy, r: 3 });
+});
+
+$('btnPause').addEventListener('click', () => {
+  paused = !paused;
+  $('btnPause').textContent = paused ? 'Resume' : 'Pause';
+  $('btnPause').classList.toggle('primary', !paused);
+});
+$('btnReset').addEventListener('click', () => { fitCanvas(); seed(); });
+$('speed').addEventListener('input', e => {
+  simSpeed = +e.target.value;
+  $('speedVal').textContent = simSpeed + '×';
+});
+$('addHerb').addEventListener('click', () => {
+  for (let i=0;i<15;i++) herbs.push(makeCreature('herb', rnd(0,W), rnd(0,H), null, CFG.herbStartEnergy));
+});
+$('addPred').addEventListener('click', () => {
+  for (let i=0;i<5;i++) preds.push(makeCreature('pred', rnd(0,W), rnd(0,H), null, CFG.predStartEnergy));
+});
+
+$('brainMode').addEventListener('change', e => {
+  brainMode = e.target.checked;
+  addEvent(brainMode ? 'Neural brains ON' : 'Rule-based steering ON');
+});
+$('speciesColor').addEventListener('change', e => speciesColor = e.target.checked);
+$('dayNight').addEventListener('change', e => dayNightOn = e.target.checked);
+
+// ---------- Save / Load ----------
+function serializeCreature(c) {
+  return { kind:c.kind, x:c.x, y:c.y, e:c.e, age:c.age, gen:c.gen, dir:c.dir,
+    g: { speed:c.g.speed, size:c.g.size, vision:c.g.vision, metabolism:c.g.metabolism,
+         aggression:c.g.aggression, brain: Array.from(c.g.brain) } };
+}
+function deserializeCreature(d) {
+  const c = makeCreature(d.kind, d.x, d.y,
+    { speed:d.g.speed, size:d.g.size, vision:d.g.vision, metabolism:d.g.metabolism,
+      aggression:d.g.aggression, brain: Float32Array.from(d.g.brain) }, d.e, d.gen);
+  c.age = d.age; c.dir = d.dir;
+  return c;
+}
+$('btnSave').addEventListener('click', () => {
+  const data = {
+    version: 2, tick, generation, stats,
+    plants: plants.map(p => ({ x:p.x, y:p.y, e:p.e })),
+    herbs: herbs.map(serializeCreature),
+    preds: preds.map(serializeCreature),
+  };
+  const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `ecosystem-gen${generation}-t${tick}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  addEvent('Ecosystem saved', 'good');
+});
+$('btnLoad').addEventListener('click', () => $('loadFile').click());
+$('loadFile').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const d = JSON.parse(reader.result);
+      tick = d.tick || 0; generation = d.generation || 0;
+      stats = Object.assign({ births:0,deaths:0,kills:0,oldest:0,peakH:0,peakP:0 }, d.stats||{});
+      plants = (d.plants||[]).map(p => ({ x:p.x, y:p.y, e:p.e, r:3 }));
+      herbs = (d.herbs||[]).map(deserializeCreature);
+      preds = (d.preds||[]).map(deserializeCreature);
+      history.length = 0; events = [];
+      lastHerbAlive = herbs.length>0; lastPredAlive = preds.length>0;
+      addEvent('Ecosystem loaded', 'good');
+    } catch (err) {
+      addEvent('Load failed: bad file', 'warn');
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
+window.addEventListener('resize', () => { fitCanvas(); });
+
+// ---------- Boot ----------
+fitCanvas();
+seed();
+frame();
+</script>
+</body>
+</html>
