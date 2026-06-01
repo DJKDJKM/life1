@@ -4,12 +4,12 @@ Two self-contained, zero-dependency life-simulation toys that run entirely in th
 browser. No build step, no frameworks, no install — just open an HTML file (or the
 hosted GitHub Pages link) and play.
 
-## 🌍 Pixel World — God Sandbox (`worldbox/`)
+## 🌍 Pixel World — God Sandbox (`2/`)
 
 A WorldBox-style pixel god-game on an `<canvas>`. Paint terrain, seed life, and watch
 kingdoms rise, war, and fall — then rain down disasters.
 
-**Live demo:** https://djkdjkm.github.io/life1/worldbox
+**Live demo:** https://djkdjkm.github.io/life1/2
 
 ### Features
 - **Procedural island worlds** generated with value-noise + radial falloff (water, sand, grass, forest, rock, snow).
@@ -52,18 +52,18 @@ Everything is a single static HTML file, so just open it:
 git clone https://github.com/DJKDJKM/life1.git
 cd life1
 # Windows
-start worldbox/index.html
+start 2/index.html
 # macOS
-open worldbox/index.html
+open 2/index.html
 # Linux
-xdg-open worldbox/index.html
+xdg-open 2/index.html
 ```
 
 Or serve the folder if your browser blocks `file://` features:
 
 ```bash
 python -m http.server 8000
-# then visit http://localhost:8000/worldbox/
+# then visit http://localhost:8000/2/
 ```
 
 ## Tech notes
@@ -78,4 +78,4 @@ python -m http.server 8000
 
 This repo is ready for Pages: **Settings → Pages → Build from branch → `main` / root**.
 Both games are then live at `https://djkdjkm.github.io/life1/` (Ecosystem) and
-`https://djkdjkm.github.io/life1/worldbox` (Pixel World).
+`https://djkdjkm.github.io/life1/2` (Pixel World).
