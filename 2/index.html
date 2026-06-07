@@ -107,7 +107,12 @@
     <div class="card">
       <h2>Spawn / tools</h2>
       <div class="palette" id="toolPalette"></div>
-      <div class="hint" style="margin-top:8px"><b>Upgrade</b> clicks the nearest house (hut → house → keep: bigger, more land, harder to raze). <b>Tower</b> raises an archer tower that shoots wolves &amp; enemy raiders. Humans now found houses only rarely.</div>
+      <div class="hint" style="margin-top:8px"><b>Upgrade</b> clicks the nearest house (hut → house → keep: bigger, more land, harder to raze). <b>Tower</b> raises an archer tower that shoots wolves &amp; enemy raiders. <b>Inspect</b> reveals details of whatever you click.</div>
+    </div>
+
+    <div class="card" id="inspectCard" style="display:none">
+      <h2>Inspector</h2>
+      <div id="inspectBody" style="font-size:12px;line-height:1.6"></div>
     </div>
 
     <div class="card">
@@ -249,7 +254,7 @@ const SEASONS=[
   { name:'Winter', grass:0.20, tint:[170,200,235], alpha:0.13 },
 ];
 let rabbits=[], wolves=[], humans=[], monsters=[], deer=[], champions=[];
-let houses=[], villages=[], vcolors=[], vfaction=[], nextVillage=1;
+let houses=[], villages=[], vcolors=[], vfaction=[], vnames=[], nextVillage=1;
 let towers=[], arrows=[];    // archer towers and the arrows they loose
 let factions=[];             // kingdoms — each {name,color}; a village belongs to one faction
 let decor=[];                // trees, pines, rocks, shrubs (decorative + flammable)
@@ -350,7 +355,7 @@ function generate() {
   lava = new Float32Array(cols*rows);
   lavaHops = new Uint8Array(cols*rows);
   territory = new Uint16Array(cols*rows);
-  flashes = []; particles=[]; events=[]; houses=[]; towers=[]; arrows=[]; monsters=[]; deer=[]; champions=[]; villages=[]; vcolors=[]; vfaction=[]; nextVillage=1; factions=[]; relations={};
+  flashes = []; particles=[]; events=[]; houses=[]; towers=[]; arrows=[]; monsters=[]; deer=[]; champions=[]; villages=[]; vcolors=[]; vfaction=[]; vnames=[]; nextVillage=1; factions=[]; relations={};
   const sc = 1/38;            // base feature scale
   // radial falloff so worlds tend to be islands surrounded by sea
   const cx0=cols/2, cy0=rows/2, maxR=Math.hypot(cx0,cy0);
@@ -407,11 +412,12 @@ function makeChampion(gx,gy,faction){ return { x:gx, y:gy, px:gx, py:gy, e:90, a
 // a human belongs to a faction (kingdom/colour) and has a role (job/behaviour)
 function makeHuman(gx,gy,faction,role){ return { x:gx, y:gy, px:gx, py:gy, e:rnd(50,75), age:0, dir:rnd(0,6.28), dead:false,
   faction: faction|0, role: role==null ? (Math.random()*ROLES.length)|0 : role }; }
-// register a new kingdom and hand back its id
-function newFaction(){
+// register a new kingdom (of a given race, or a random one) and hand back its id
+function newFaction(race){
   const id=factions.length;
-  if(id<FACTION_PALETTE.length) factions.push({ name:FACTION_PALETTE[id].name, color:FACTION_PALETTE[id].color.slice() });
-  else factions.push({ name:'Clan '+(id+1), color:[rnd(70,235)|0, rnd(70,235)|0, rnd(70,235)|0] });
+  const color = id<FACTION_PALETTE.length ? FACTION_PALETTE[id].color.slice() : [rnd(70,235)|0, rnd(70,235)|0, rnd(70,235)|0];
+  const rc = race==null ? (Math.random()*RACES.length)|0 : race;
+  factions.push({ name:genRealm(), color, race:rc });
   return id;
 }
 
@@ -421,14 +427,16 @@ function newFaction(){
 const WAR=-1, PEACE=0, ALLY=1;
 let relations = {};  // key "a_b" (a<b) -> relation value
 function relKey(a,b){ return a<b ? a+'_'+b : b+'_'+a; }
-function relGet(a,b){ if(a===b) return ALLY; const k=relKey(a,b); return (k in relations) ? relations[k] : WAR; }
+function relGet(a,b){ if(a===b) return ALLY; const k=relKey(a,b); if(k in relations) return relations[k];
+  // unset: kingdoms of the same race coexist by default; different races are born rivals
+  return (factions[a] && factions[b] && factions[a].race===factions[b].race) ? PEACE : WAR; }
 function relSet(a,b,v){ if(a!==b) relations[relKey(a,b)]=v; }
 function atWar(a,b){ return relGet(a,b)===WAR; }
 // a monster is a roaming brute that smashes villages; only fighters can bring it down
 function makeMonster(gx,gy){ return { x:gx, y:gy, px:gx, py:gy, hp:MONSTER.hp, age:0, dir:rnd(0,6.28), dead:false, smashCd:0 }; }
 function seedLife() {
   rabbits=[]; wolves=[]; humans=[]; monsters=[]; deer=[]; champions=[];
-  houses=[]; towers=[]; arrows=[]; villages=[]; vcolors=[]; vfaction=[]; nextVillage=1; factions=[]; relations={};
+  houses=[]; towers=[]; arrows=[]; villages=[]; vcolors=[]; vfaction=[]; vnames=[]; nextVillage=1; factions=[]; relations={};
   if(territory) territory.fill(0);
   for(let i=0;i<opts.initRabbits;i++){ const p=randomLandCell(); if(p) rabbits.push(makeRabbit(p.x,p.y)); }
   for(let i=0;i<opts.initWolves;i++){ const p=randomLandCell(); if(p) wolves.push(makeWolf(p.x,p.y)); }
@@ -438,7 +446,7 @@ function seedLife() {
   // seed the starter kingdoms, each with a mix of all three human roles
   for(let f=0;f<opts.initKingdoms;f++){
     const c=randomLandCell(); if(!c) continue;
-    const fac=newFaction();
+    const fac=newFaction(f % RACES.length);   // spread the starter kingdoms across the races
     for(let i=0;i<9;i++){
       const gx=clamp(c.x+rnd(-3,3),0.5,cols-0.5), gy=clamp(c.y+rnd(-3,3),0.5,rows-0.5);
       if(walkableAt(gx,gy)) humans.push(makeHuman(gx,gy,fac,i%ROLES.length));
@@ -473,6 +481,27 @@ const FACTION_PALETTE = [
   { name:'Verdant', color:[90,200,90]  }, { name:'Amber',   color:[225,170,60] },
   { name:'Violet',  color:[170,110,225]}, { name:'Teal',    color:[60,205,195] },
 ];
+// ---- Races ---- each kingdom belongs to a race with its own traits, looks & favoured biome.
+// Same-race kingdoms tend to coexist; different races default to war (see relGet).
+const RACES = [
+  { name:'Human', accent:[235,225,205], might:1.0,  speed:1.0,  vision:1.0, build:1.1, biome:T_GRASS  },
+  { name:'Elf',   accent:[150,235,160], might:0.9,  speed:1.2,  vision:1.35,build:0.9, biome:T_FOREST },
+  { name:'Dwarf', accent:[210,165,110], might:1.2,  speed:0.85, vision:0.9, build:1.35,biome:T_ROCK   },
+  { name:'Orc',   accent:[120,190,90],  might:1.45, speed:1.05, vision:1.0, build:0.8, biome:T_SAND   },
+];
+// fantasy name generation for realms, cities and villagers
+const NAME_A=['El','Var','Mor','Thal','Bryn','Kor','Aze','Cael','Dun','Fen','Grim','Hol','Ish','Jor','Kel','Lor','Myr','Nor','Or','Per','Quel','Ruun','Syl','Tor','Ul','Vor','Wyn','Xan','Yor','Zur'];
+const NAME_B=['ador','heim','gard','wyn','dor','mar','ion','grad','fell','holm','vale','reach','mere','stead','crest','wick','spire','hollow','watch','foss'];
+const PERSON_B=['a','en','os','ia','ir','un','eth','ric','wyn','ara','or','is','ael','ón','ek','il'];
+const pick=arr=>arr[(Math.random()*arr.length)|0];
+function genRealm(){ return pick(NAME_A)+pick(NAME_B); }
+function genCity(){ return pick(NAME_A)+pick(NAME_B); }
+function genPerson(){ return pick(NAME_A)+pick(PERSON_B); }
+// per-villager effective stats fold ROLE × RACE together
+function fRace(f){ return RACES[(factions[f]&&factions[f].race)||0]; }
+function hSpeed(h){ return ROLES[h.role].speed * fRace(h.faction).speed; }
+function hVision(h){ return ROLES[h.role].vision * fRace(h.faction).vision; }
+function hMight(h){ return (h.hero?CHAMP.might:ROLES[h.role].might) * fRace(h.faction).might; }
 const WAR_RANGE = 22;     // how far raiders look for enemy villages to sack
 const GRASS_REGROW = 0.0012;
 const HOUSE_NAME = ['hut','house','keep'];
@@ -521,8 +550,8 @@ function buildHouse(h){
   const cx=h.x|0, cy=h.y|0, fac=h.faction;
   let vid = villageNearFaction(cx, cy, HUMAN.foundR, fac);
   let center=false;
-  if(!vid){ vid=nextVillage++; vfaction[vid]=fac; vcolors[vid]=jitter(factions[fac].color); villages.push(vid); center=true;
-    const c=factions[fac].color; logEvent(`${factions[fac].name} founded a village`, `rgb(${c[0]},${c[1]},${c[2]})`); }
+  if(!vid){ vid=nextVillage++; vfaction[vid]=fac; vcolors[vid]=jitter(factions[fac].color); vnames[vid]=genCity(); villages.push(vid); center=true;
+    const c=factions[fac].color; logEvent(`${factions[fac].name} founded ${vnames[vid]}`, `rgb(${c[0]},${c[1]},${c[2]})`); }
   houses.push({ x:cx+0.5, y:cy+0.5, village:vid, faction:fac, center, dead:false, level:1, hp:1 });
   stampTerritory(cx, cy, vid, HUMAN.claimR);
   h.e -= HUMAN.buildCost * ROLES[h.role].buildMult;
@@ -576,7 +605,7 @@ function nearestEnemyHouse(h,range){
 }
 // returns true if the attacker wins the clash
 function attackerWins(att,def){
-  const am=att.hero?CHAMP.might:ROLES[att.role].might, dm=def.hero?CHAMP.might:ROLES[def.role].might;
+  const am=hMight(att), dm=hMight(def);
   return Math.random()*(am+dm) < am;
 }
 
@@ -919,33 +948,34 @@ function step(){
   // ---- Humans ----
   buildBuckets(); // refresh rabbit lookup (wolves may have eaten some) for hunters
   for(let i=humans.length-1;i>=0;i--){
-    const h=humans[i], tb=ROLES[h.role];
+    const h=humans[i], tb=ROLES[h.role], rc=fRace(h.faction);
     if(h.dead) continue;
     const ci=idx(h.x|0, h.y|0);
+    const spd=tb.speed*rc.speed, vis=tb.vision*rc.vision;  // race-adjusted speed & sight
     let acted=false;
 
     // 1) flee lava
     const blaze=nearestLava(h.x, h.y, 4);
-    if(blaze){ moveCreature(h, Math.atan2(h.y-blaze.y, h.x-blaze.x)+rnd(-0.3,0.3), tb.speed*1.3); acted=true; }
+    if(blaze){ moveCreature(h, Math.atan2(h.y-blaze.y, h.x-blaze.x)+rnd(-0.3,0.3), spd*1.3); acted=true; }
 
     // 2) war — raiders march on enemy people & villages; warriors defend, farmers flee
     if(!acted && opts.warRate>0){
-      const foe=nearestEnemyHuman(h, tb.vision*opts.warRate);
+      const foe=nearestEnemyHuman(h, vis*opts.warRate);
       if(foe){
         if(tb.raids || tb.fights){
-          moveCreature(h, Math.atan2(foe.y-h.y, foe.x-h.x), tb.speed);
+          moveCreature(h, Math.atan2(foe.y-h.y, foe.x-h.x), spd);
           if((h.x-foe.x)**2+(h.y-foe.y)**2 < 1.6){
             if(attackerWins(h,foe)){ foe.dead=true; h.e+=14; bloodAt(foe.x,foe.y); }
             else { h.dead=true; bloodAt(h.x,h.y); }
           }
         } else {
-          moveCreature(h, Math.atan2(h.y-foe.y, h.x-foe.x)+rnd(-0.3,0.3), tb.speed*1.15);
+          moveCreature(h, Math.atan2(h.y-foe.y, h.x-foe.x)+rnd(-0.3,0.3), spd*1.15);
         }
         acted=true;
       } else if(tb.raids){
         const tgt=nearestEnemyHouse(h, WAR_RANGE*opts.warRate);
         if(tgt){
-          moveCreature(h, Math.atan2(tgt.y-h.y, tgt.x-h.x), tb.speed);
+          moveCreature(h, Math.atan2(tgt.y-h.y, tgt.x-h.x), spd);
           if((h.x-tgt.x)**2+(h.y-tgt.y)**2 < 2.0){
             tgt.hp-=1; spark(tgt.x, tgt.y, '120,90,60', 8, 0.6, 22, 0.01);
             if(tgt.hp<=0){ tgt.dead=true; logEvent(`${factions[h.faction].name} razed a ${factions[tgt.faction].name} ${HOUSE_NAME[tgt.level-1]||'house'}`, '#e07a5a'); }
@@ -958,14 +988,14 @@ function step(){
 
     // 3) wolves: hunters hunt them, everyone else flees
     if(!acted){
-      let wolf=null, wb=tb.vision*tb.vision;
+      let wolf=null, wb=vis*vis;
       for(const w of wolves){ const d=(w.x-h.x)**2+(w.y-h.y)**2; if(d<wb){wb=d; wolf=w;} }
       if(wolf){
         if(tb.fights){
-          moveCreature(h, Math.atan2(wolf.y-h.y, wolf.x-h.x), tb.speed);
+          moveCreature(h, Math.atan2(wolf.y-h.y, wolf.x-h.x), spd);
           if((h.x-wolf.x)**2+(h.y-wolf.y)**2 < 1.6){ const wi=wolves.indexOf(wolf); if(wi>=0) wolves.splice(wi,1); h.e += HUMAN.meatGain; bloodAt(wolf.x,wolf.y); }
         } else {
-          moveCreature(h, Math.atan2(h.y-wolf.y, h.x-wolf.x)+rnd(-0.3,0.3), tb.speed*1.2);
+          moveCreature(h, Math.atan2(h.y-wolf.y, h.x-wolf.x)+rnd(-0.3,0.3), spd*1.2);
         }
         acted=true;
       }
@@ -973,12 +1003,12 @@ function step(){
 
     // 4) hunters chase game for meat — deer preferred (richer), else rabbits
     if(!acted && tb.hunts){
-      const dPrey=nearestDeer(h.x, h.y, tb.vision), rPrey=nearestRabbit(h.x, h.y, tb.vision);
+      const dPrey=nearestDeer(h.x, h.y, vis), rPrey=nearestRabbit(h.x, h.y, vis);
       let prey=null, isDeer=false;
       if(dPrey && (!rPrey || (dPrey.x-h.x)**2+(dPrey.y-h.y)**2 < (rPrey.x-h.x)**2+(rPrey.y-h.y)**2)){ prey=dPrey; isDeer=true; }
       else if(rPrey){ prey=rPrey; }
       if(prey){
-        moveCreature(h, Math.atan2(prey.y-h.y, prey.x-h.x), tb.speed);
+        moveCreature(h, Math.atan2(prey.y-h.y, prey.x-h.x), spd);
         if((h.x-prey.x)**2+(h.y-prey.y)**2 < 1.6){
           if(isDeer){ const di=deer.indexOf(prey); if(di>=0) deer.splice(di,1); h.e += HUMAN.meatGain*1.7; }
           else { const pi=rabbits.indexOf(prey); if(pi>=0) rabbits.splice(pi,1); h.e += HUMAN.meatGain; }
@@ -990,13 +1020,14 @@ function step(){
 
     // 5) forage grass + wander toward greener ground
     if(!acted){
-      if(grass[ci] > 0.1){ const eaten=Math.min(0.05 + grass[ci]*0.05, grass[ci]); grass[ci]-=eaten; h.e += eaten*tb.forage; }
+      if(grass[ci] > 0.1){ const biomeBonus = terrain[ci]===rc.biome ? 1.5 : 1; // thrive on their favoured land
+        const eaten=Math.min(0.05 + grass[ci]*0.05, grass[ci]); grass[ci]-=eaten; h.e += eaten*tb.forage*biomeBonus; }
       let bestDir=h.dir, bestG=-1;
       for(let a=0;a<5;a++){
         const ang=rnd(0,6.28), sx=(h.x+Math.cos(ang)*3)|0, sy=(h.y+Math.sin(ang)*3)|0;
         if(inBounds(sx,sy) && buildableAt(sx,sy)){ const g=grass[idx(sx,sy)]; if(g>bestG){bestG=g; bestDir=ang;} }
       }
-      moveCreature(h, bestDir+rnd(-0.5,0.5), tb.speed);
+      moveCreature(h, bestDir+rnd(-0.5,0.5), spd);
     }
 
     h.e -= HUMAN.hunger; h.age++;
@@ -1034,7 +1065,7 @@ function step(){
     }
     // fighters (and any nearby armed humans) hack at the monster
     for(const h of humans){ if(h.dead || !ROLES[h.role].fights) continue;
-      if((h.x-m.x)**2+(h.y-m.y)**2 < 2.2){ m.hp-=MONSTER.fighterDmg*ROLES[h.role].might; bloodAt(m.x+rnd(-.5,.5), m.y+rnd(-.5,.5)); } }
+      if((h.x-m.x)**2+(h.y-m.y)**2 < 2.2){ m.hp-=MONSTER.fighterDmg*hMight(h); bloodAt(m.x+rnd(-.5,.5), m.y+rnd(-.5,.5)); } }
     m.age++;
     if(m.hp<=0){ m.dead=true; logEvent('A monster was slain!', '#ffd24a'); spark(m.x,m.y,'120,200,120',26,1.1,30,-0.01); monsters.splice(i,1); continue; }
     if(m.age>MONSTER.maxAge){ m.dead=true; monsters.splice(i,1); }
@@ -1263,6 +1294,8 @@ function render(){
     const c=factions[h.faction].color, x=ix(h)-sz/2, y=iy(h)-sz/2;
     ctx.fillStyle=`rgb(${c[0]},${c[1]},${c[2]})`; ctx.fillRect(x, y, sz, sz);   // kingdom colour body
     ctx.fillStyle=ROLE_TINT[h.role]; ctx.fillRect(x, y, sz, Math.max(1, sz*0.4)); // role-coloured cap
+    const ra=fRace(h.faction).accent;                                            // race accent stripe at the feet
+    ctx.fillStyle=`rgb(${ra[0]},${ra[1]},${ra[2]})`; ctx.fillRect(x, y+sz-Math.max(1,sz*0.25), sz, Math.max(1, sz*0.25));
   }
   // monsters — hulking brutes with glowing eyes and a health bar when wounded
   for(const m of monsters){
@@ -1439,6 +1472,7 @@ function buildPalettes(){
     {type:'monster', label:'Monster', sw:'radial-gradient(#ffd24a 18%,#7e2b2b 22%,#5a1f1f)'},
     {type:'forest',  label:'Forest',  sw:'linear-gradient(#3f8a3f,#1f5c33)'},
     {type:'bless',   label:'Bless',   sw:'radial-gradient(#fff6c0,#7fe0a0 60%,#2f9d6b)'},
+    {type:'inspect', label:'Inspect', sw:'radial-gradient(#ffffff 30%,#6bd0db 32%,#1f5560)'},
   ];
   tools.forEach(t=>{
     const el=document.createElement('div'); el.className='brush';
@@ -1504,7 +1538,7 @@ function updatePanel(){
       <span style="width:11px;height:11px;border-radius:3px;background:rgb(${c[0]},${c[1]},${c[2]})"></span>
       <span style="flex:1">${fa.name}</span>
       <span style="color:#cfe">${pop[i]} pop · ${vil[i]} vil</span></div>
-      <div style="font-size:10px;color:#8a93a8;margin:-2px 0 3px 18px">${roleMix[i][0]} farm · ${roleMix[i][1]} hunt · ${roleMix[i][2]} roam</div>`;
+      <div style="font-size:10px;color:#8a93a8;margin:-2px 0 3px 18px">${RACES[fa.race].name} · ${roleMix[i][0]} farm · ${roleMix[i][1]} hunt · ${roleMix[i][2]} roam</div>`;
   }).join('') || '<div style="color:#8a93a8">No kingdoms yet — paint a Colony</div>';
 
   // diplomacy: a clickable relation chip for every pair of active kingdoms
@@ -1530,6 +1564,40 @@ window.cycleRel=(a,b)=>{ const cur=relGet(a,b); const next = cur===WAR?PEACE : c
   logEvent(next===WAR?`${an} declared war on ${bn}` : next===ALLY?`${an} & ${bn} forged an alliance` : `${an} & ${bn} made peace`,
            next===WAR?'#e07a5a':next===ALLY?'#6bd0db':'#cfe');
   updatePanel(); };
+
+// ---- Inspect: click anything to read its story ----
+function showInspect(html){ $('inspectCard').style.display='block'; $('inspectBody').innerHTML=html; }
+function fmtAge(a){ return (a/DAY_LEN).toFixed(1)+' days'; }
+function inspectAt(gx,gy){
+  const R=Math.max(3, brushSize), r2=R*R;
+  let best=null, bd=r2, kind=null;
+  const consider=(arr,k)=>{ for(const c of arr){ if(c.dead) continue; const d=(c.x-gx)**2+(c.y-gy)**2; if(d<bd){bd=d; best=c; kind=k;} } };
+  consider(champions,'champion'); consider(humans,'human'); consider(monsters,'monster'); consider(wolves,'wolf'); consider(deer,'deer'); consider(rabbits,'rabbit');
+  let bldg=null, bbd=r2, bk=null;
+  for(const h of houses){ if(h.dead) continue; const d=(h.x-gx)**2+(h.y-gy)**2; if(d<bbd){bbd=d; bldg=h; bk='house';} }
+  for(const t of towers){ const d=(t.x-gx)**2+(t.y-gy)**2; if(d<bbd){bbd=d; bldg=t; bk='tower';} }
+  if(best && (!bldg || bd<=bbd)) return inspectCreature(best,kind);
+  if(bldg) return inspectBuilding(bldg,bk);
+  if(inBounds(gx|0,gy|0)){ const i=idx(gx|0,gy|0), t=TERRAIN[terrain[i]];
+    showInspect(`<b>Wild land</b><br>Terrain: ${t.name}<br>Grass: ${Math.round(clamp(grass[i]/Math.max(t.grassCap,0.0001),0,1)*100)}%${lava[i]>0?'<br><span style="color:#e0521a">Molten lava</span>':''}`); }
+}
+function inspectCreature(c,kind){
+  if(kind==='champion'){ const fa=factions[c.faction];
+    showInspect(`<b style="color:#ffd24a">⚔ ${c.name}</b> <span style="color:#8a93a8">the Champion</span><br>Realm: ${fa.name}<br>Race: ${RACES[fa.race].name}<br>Health: ${Math.max(0,Math.round(c.hp))} / ${CHAMP.hp}<br>Age: ${fmtAge(c.age)}`);
+  } else if(kind==='human'){ if(!c.name) c.name=genPerson(); const fa=factions[c.faction];
+    showInspect(`<b>${c.name}</b><br>Realm: ${fa.name}<br>Race: ${RACES[fa.race].name}<br>Job: ${ROLES[c.role].name}<br>Vigour: ${Math.round(c.e)}<br>Age: ${fmtAge(c.age)}`);
+  } else if(kind==='monster'){
+    showInspect(`<b style="color:#e0563a">Monster</b><br>Health: ${Math.max(0,Math.round(c.hp))} / ${MONSTER.hp}<br>Age: ${fmtAge(c.age)}`);
+  } else { const label={wolf:'Wolf',deer:'Deer',rabbit:'Rabbit'}[kind];
+    showInspect(`<b>${label}</b><br>Vigour: ${Math.round(c.e)}<br>Age: ${fmtAge(c.age)}`); }
+}
+function inspectBuilding(b,k){
+  if(k==='tower'){ const fa=b.faction>=0?factions[b.faction]:null;
+    showInspect(`<b>Archer Tower</b><br>${fa?('Realm: '+fa.name+'<br>Race: '+RACES[fa.race].name):'A neutral watchtower'}`); return; }
+  const fa=factions[b.faction], vn=vnames[b.village]||'an unnamed village';
+  const villageHouses=houses.filter(h=>h.village===b.village).length;
+  showInspect(`<b>${(HOUSE_NAME[(b.level||1)-1]||'house')}${b.center?' · capital':''}</b><br>City: ${vn}<br>Realm: ${fa.name}<br>Race: ${RACES[fa.race].name}<br>Tier: ${b.level||1} / 3<br>Dwellings: ${villageHouses}`);
+}
 
 // ============ Loop ============
 function snapshot(){ // remember positions so render can interpolate toward the next step
@@ -1571,6 +1639,7 @@ world.addEventListener('mousedown', e=>{
   evtCell(e);
   if(e.button===1 || e.button===2){ panning=true; lastPan={x:e.clientX,y:e.clientY}; return; } // middle/right = pan
   const [cx,cy]=cellAt();
+  if(brushMode.type==='inspect'){ inspectAt(cx+0.5, cy+0.5); return; }               // click to learn
   if(brushMode.type==='meteor'){ triggerMeteor(cx,cy); gridDirty=true; return; }     // one-shot
   if(brushMode.type==='lightning'){ triggerLightning(cx,cy); gridDirty=true; return; } // one-shot
   if(brushMode.type==='plague'){ triggerPlague(cx,cy); return; }
@@ -1707,7 +1776,7 @@ $('btnMeteorShower').addEventListener('click', ()=>{
   logEvent('A meteor storm rained down!', '#ffb066'); gridDirty=true;
 });
 $('btnClearLife').addEventListener('click', ()=>{
-  rabbits=[]; wolves=[]; monsters=[]; humans=[]; deer=[]; champions=[]; houses=[]; towers=[]; arrows=[]; villages=[]; vcolors=[]; vfaction=[]; factions=[]; relations={}; nextVillage=1;
+  rabbits=[]; wolves=[]; monsters=[]; humans=[]; deer=[]; champions=[]; houses=[]; towers=[]; arrows=[]; villages=[]; vcolors=[]; vfaction=[]; vnames=[]; factions=[]; relations={}; nextVillage=1;
   if(territory) territory.fill(0); logEvent('All life was wiped clean', '#e07a5a'); gridDirty=true;
 });
 $('btnDouse').addEventListener('click', ()=>{ if(lava) lava.fill(0); logEvent('The lava was doused', '#7bdcff'); gridDirty=true; });
