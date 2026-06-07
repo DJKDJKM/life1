@@ -158,6 +158,8 @@
           <input type="range" id="initRabbits" min="0" max="800" value="260" step="20"></label>
         <label class="slider">Starting wolves <span id="initWolvesVal">26</span>
           <input type="range" id="initWolves" min="0" max="120" value="26" step="2"></label>
+        <label class="slider">Starting deer herds <span id="initDeerVal">6</span>
+          <input type="range" id="initDeer" min="0" max="30" value="6" step="1"></label>
         <label class="slider">Starting kingdoms <span id="initKingdomsVal">5</span>
           <input type="range" id="initKingdoms" min="0" max="6" value="5" step="1"></label>
         <div class="hint" style="margin-top:6px">These take effect on <b>New world</b>. Smaller worlds run faster.</div>
@@ -168,13 +170,16 @@
       <h2>World</h2>
       <div class="stats">
         <div class="s"><span>Rabbits</span><span id="nRabbit">0</span></div>
+        <div class="s"><span>Deer</span><span id="nDeer">0</span></div>
         <div class="s"><span>Wolves</span><span id="nWolf">0</span></div>
         <div class="s"><span>Humans</span><span id="nHuman">0</span></div>
+        <div class="s"><span>Champions</span><span id="nChamp">0</span></div>
         <div class="s"><span>Houses</span><span id="nHouse">0</span></div>
         <div class="s"><span>Villages</span><span id="nVillage">0</span></div>
         <div class="s"><span>Towers</span><span id="nTower">0</span></div>
         <div class="s"><span>Monsters</span><span id="nMonster">0</span></div>
         <div class="s"><span>Grass</span><span id="grassPct">0%</span></div>
+        <div class="s"><span>Season</span><span id="season">Spring</span></div>
         <div class="s"><span>Time</span><span id="timePhase">Day</span></div>
         <div class="s"><span>Tick</span><span id="tick">0</span></div>
       </div>
@@ -234,7 +239,16 @@ let events=[];               // dramatic on-screen toasts
 let timeOfDay=0.30;          // 0..1 around the clock (0.25 ~ dawn, 0.75 ~ dusk)
 let nightF=0;                // 0 at noon .. 1 at midnight
 const DAY_LEN=900;           // ticks per full day-night cycle
-let rabbits=[], wolves=[], humans=[], monsters=[];
+const YEAR_LEN=DAY_LEN*4;    // four days per year -> one day per season
+let season=0;                // 0 Spring, 1 Summer, 2 Autumn, 3 Winter
+let seasonGrass=1;           // grass-growth multiplier for the current season
+const SEASONS=[
+  { name:'Spring', grass:1.25, tint:[90,170,90],   alpha:0.05 },
+  { name:'Summer', grass:1.45, tint:[235,200,120], alpha:0.05 },
+  { name:'Autumn', grass:0.80, tint:[210,140,60],  alpha:0.07 },
+  { name:'Winter', grass:0.20, tint:[170,200,235], alpha:0.13 },
+];
+let rabbits=[], wolves=[], humans=[], monsters=[], deer=[], champions=[];
 let houses=[], villages=[], vcolors=[], vfaction=[], nextVillage=1;
 let towers=[], arrows=[];    // archer towers and the arrows they loose
 let factions=[];             // kingdoms — each {name,color}; a village belongs to one faction
@@ -250,7 +264,7 @@ const opts = {
   // rules (multipliers, 1 = default)
   grassRate:1, wolfAggr:1, monsterRate:1, warRate:1, buildRate:1, breedRate:1,
   // new-world generation
-  seaLevel:0.30, initRabbits:260, initWolves:26, initKingdoms:5,
+  seaLevel:0.30, initRabbits:260, initWolves:26, initKingdoms:5, initDeer:6,
 };
 const WORLD_SIZES = [1.2, 2.0, 3.0, 4.0, 5.5];   // grid-to-viewport scale; index from the slider
 let WORLD_SCALE = WORLD_SIZES[1];
@@ -336,7 +350,7 @@ function generate() {
   lava = new Float32Array(cols*rows);
   lavaHops = new Uint8Array(cols*rows);
   territory = new Uint16Array(cols*rows);
-  flashes = []; particles=[]; events=[]; houses=[]; towers=[]; arrows=[]; monsters=[]; villages=[]; vcolors=[]; vfaction=[]; nextVillage=1; factions=[]; relations={};
+  flashes = []; particles=[]; events=[]; houses=[]; towers=[]; arrows=[]; monsters=[]; deer=[]; champions=[]; villages=[]; vcolors=[]; vfaction=[]; nextVillage=1; factions=[]; relations={};
   const sc = 1/38;            // base feature scale
   // radial falloff so worlds tend to be islands surrounded by sea
   const cx0=cols/2, cy0=rows/2, maxR=Math.hypot(cx0,cy0);
@@ -387,6 +401,9 @@ function randomLandCell() {
 }
 function makeRabbit(gx,gy){ return { x:gx, y:gy, px:gx, py:gy, e:rnd(20,32), age:0, dir:rnd(0,6.28) }; }
 function makeWolf(gx,gy){ return { x:gx, y:gy, px:gx, py:gy, e:rnd(45,70), age:0, dir:rnd(0,6.28) }; }
+function makeDeer(gx,gy){ return { x:gx, y:gy, px:gx, py:gy, e:rnd(40,60), age:0, dir:rnd(0,6.28) }; }
+function makeChampion(gx,gy,faction){ return { x:gx, y:gy, px:gx, py:gy, e:90, age:0, dir:rnd(0,6.28), dead:false,
+  faction:faction|0, role:1, hero:true, hp:CHAMP.hp, name:CHAMP_NAMES[(champSeq++)%CHAMP_NAMES.length] }; }
 // a human belongs to a faction (kingdom/colour) and has a role (job/behaviour)
 function makeHuman(gx,gy,faction,role){ return { x:gx, y:gy, px:gx, py:gy, e:rnd(50,75), age:0, dir:rnd(0,6.28), dead:false,
   faction: faction|0, role: role==null ? (Math.random()*ROLES.length)|0 : role }; }
@@ -410,11 +427,14 @@ function atWar(a,b){ return relGet(a,b)===WAR; }
 // a monster is a roaming brute that smashes villages; only fighters can bring it down
 function makeMonster(gx,gy){ return { x:gx, y:gy, px:gx, py:gy, hp:MONSTER.hp, age:0, dir:rnd(0,6.28), dead:false, smashCd:0 }; }
 function seedLife() {
-  rabbits=[]; wolves=[]; humans=[]; monsters=[];
+  rabbits=[]; wolves=[]; humans=[]; monsters=[]; deer=[]; champions=[];
   houses=[]; towers=[]; arrows=[]; villages=[]; vcolors=[]; vfaction=[]; nextVillage=1; factions=[]; relations={};
   if(territory) territory.fill(0);
   for(let i=0;i<opts.initRabbits;i++){ const p=randomLandCell(); if(p) rabbits.push(makeRabbit(p.x,p.y)); }
   for(let i=0;i<opts.initWolves;i++){ const p=randomLandCell(); if(p) wolves.push(makeWolf(p.x,p.y)); }
+  // a few starter deer herds
+  for(let g=0;g<opts.initDeer;g++){ const c=randomLandCell(); if(!c) continue;
+    for(let i=0;i<rnd(3,6);i++){ const gx=clamp(c.x+rnd(-2,2),0.5,cols-0.5), gy=clamp(c.y+rnd(-2,2),0.5,rows-0.5); if(walkableAt(gx,gy)) deer.push(makeDeer(gx,gy)); } }
   // seed the starter kingdoms, each with a mix of all three human roles
   for(let f=0;f<opts.initKingdoms;f++){
     const c=randomLandCell(); if(!c) continue;
@@ -431,6 +451,12 @@ function regen(){ seed=Math.random()*1000; fitCanvas(); generate(); seedLife(); 
 // ============ Simulation ============
 const RABBIT = { maxAge:1500, burn:0.045, repro:52, eat:0.5, gainPerGrass:30, speed:0.34, vision:9, cap:2600 };
 const WOLF   = { maxAge:2100, burn:0.06,  repro:115, gain:38, speed:0.46, vision:16, cap:500 };
+// deer: larger, faster grazers that move in loose herds; rich meat for wolves & hunters
+const DEER   = { maxAge:2600, burn:0.05, repro:140, eat:0.6, gainPerGrass:34, speed:0.40, vision:14, herd:7, cap:240, gain:60 };
+// champions: rare named heroes a thriving kingdom raises — tough monster-slayers & war leaders
+const CHAMP  = { hp:60, speed:0.40, vision:22, might:3.2, maxAge:6000, dmg:5 };
+const CHAMP_NAMES=['Aldric','Bryn','Cael','Dara','Eira','Faelan','Gwyn','Hale','Ilsa','Joren','Kira','Lorne','Mira','Nox','Orin','Perra','Quill','Rhea','Soren','Tove','Ulric','Vesna','Wren','Yara','Zephyr'];
+let champSeq=0;
 const MONSTER= { hp:90, speed:0.30, vision:30, smashDmg:1, smashCd:18, hitR:2.2, maxAge:6000, fighterDmg:2.2, cap:20 };
 const HUMAN  = { maxAge:4500, hunger:0.03, speed:0.30, build:85, buildCost:55,
                  repro:120, meatGain:34, claimR:4, foundR:7, spacing:3, cap:700 };
@@ -550,7 +576,7 @@ function nearestEnemyHouse(h,range){
 }
 // returns true if the attacker wins the clash
 function attackerWins(att,def){
-  const am=ROLES[att.role].might, dm=ROLES[def.role].might;
+  const am=att.hero?CHAMP.might:ROLES[att.role].might, dm=def.hero?CHAMP.might:ROLES[def.role].might;
   return Math.random()*(am+dm) < am;
 }
 
@@ -573,6 +599,17 @@ function nearestRabbit(wx,wy,range){
     const arr=buckets.get((bx+ox)+'_'+(by+oy)); if(!arr) continue;
     for(const r of arr){ const dx=r.x-wx, dy=r.y-wy, d=dx*dx+dy*dy; if(d<bd){bd=d; best=r;} }
   }
+  return best;
+}
+// deer are few, so a plain scan is fine
+function nearestDeer(wx,wy,range){
+  let best=null, bd=range*range;
+  for(const dr of deer){ const dx=dr.x-wx, dy=dr.y-wy, d=dx*dx+dy*dy; if(d<bd){bd=d; best=dr;} }
+  return best;
+}
+function nearestMonster(wx,wy,range){
+  let best=null, bd=range*range;
+  for(const m of monsters){ if(m.dead) continue; const dx=m.x-wx, dy=m.y-wy, d=dx*dx+dy*dy; if(d<bd){bd=d; best=m;} }
   return best;
 }
 
@@ -631,6 +668,8 @@ function killInRadius(cx,cy,R){
   rabbits=rabbits.filter(c=> (c.x-cx)**2+(c.y-cy)**2 > r2);
   wolves =wolves.filter(c=> (c.x-cx)**2+(c.y-cy)**2 > r2);
   humans =humans.filter(c=> (c.x-cx)**2+(c.y-cy)**2 > r2);
+  deer   =deer.filter(c=> (c.x-cx)**2+(c.y-cy)**2 > r2);
+  champions=champions.filter(c=> (c.x-cx)**2+(c.y-cy)**2 > r2);
 }
 // All disasters are deliberately LOCAL — small radii, partial effects, recoverable land —
 // so a single strike never wipes out the world. Lava in particular is hop-capped (see updateLava).
@@ -714,7 +753,7 @@ function triggerTornado(cx,cy){
   logEvent('A tornado tore through', '#cfd6e2');
   const toss=(c)=>{ if((c.x-cx)**2+(c.y-cy)**2<r2){ const a=rnd(0,6.28), s=rnd(2,6);
     c.x=clamp(c.x+Math.cos(a)*s,0.5,cols-0.5); c.y=clamp(c.y+Math.sin(a)*s,0.5,rows-0.5); c.px=c.x; c.py=c.y; } };
-  for(const r of rabbits) toss(r); for(const w of wolves) toss(w); for(const h of humans) toss(h);
+  for(const r of rabbits) toss(r); for(const w of wolves) toss(w); for(const h of humans) toss(h); for(const dr of deer) toss(dr); for(const ch of champions) toss(ch);
   // a small chance to fling a villager to their death, and it scatters trees
   rabbits=rabbits.filter(c=> (c.x-cx)**2+(c.y-cy)**2>r2 || Math.random()>0.15);
   removeDecorNear(cx,cy,R*0.5);
@@ -778,10 +817,14 @@ function step(){
   tick++;
   timeOfDay = (timeOfDay + 1/DAY_LEN) % 1;
   nightF = 0.5 + 0.5*Math.cos(timeOfDay*6.2832);  // 1 at midnight, 0 at noon
+  const prevSeason=season;
+  season = Math.floor(((tick/YEAR_LEN)%1)*4) % 4;  // cycle through the four seasons
+  seasonGrass = SEASONS[season].grass;
+  if(season!==prevSeason) logEvent(`${SEASONS[season].name} arrives`, `rgb(${SEASONS[season].tint.join(',')})`);
   const r0=rabbits.length, w0=wolves.length;
 
-  // grass regrowth (rate adjustable)
-  const regrow=GRASS_REGROW*opts.grassRate;
+  // grass regrowth (rate adjustable, and seasonal)
+  const regrow=GRASS_REGROW*opts.grassRate*seasonGrass;
   if(regrow>0) for(let i=0;i<grass.length;i++){
     const cap=TERRAIN[terrain[i]].grassCap;
     if(cap>0 && grass[i]<cap) grass[i]=Math.min(cap, grass[i]+regrow);
@@ -820,25 +863,50 @@ function step(){
     if(r.e<=0 || r.age>RABBIT.maxAge) rabbits.splice(i,1);
   }
 
+  // ---- Deer ---- skittish herd grazers: flee predators, otherwise graze & stick together
+  for(let i=deer.length-1;i>=0;i--){
+    const d=deer[i];
+    let fleeDir=null, fbest=DEER.vision*DEER.vision;
+    for(const w of wolves){ const dx=w.x-d.x, dy=w.y-d.y, dd=dx*dx+dy*dy; if(dd<fbest){fbest=dd; fleeDir=Math.atan2(dy,dx)+Math.PI;} }
+    for(const m of monsters){ if(m.dead) continue; const dx=m.x-d.x, dy=m.y-d.y, dd=dx*dx+dy*dy; if(dd<fbest){fbest=dd; fleeDir=Math.atan2(dy,dx)+Math.PI;} }
+    if(fleeDir!==null){
+      moveCreature(d, fleeDir+rnd(-0.3,0.3), DEER.speed*1.35);
+    } else {
+      const ci=idx(d.x|0, d.y|0);
+      if(grass[ci] > 0.15){ const eaten=Math.min(DEER.eat*0.04 + grass[ci]*0.05, grass[ci]); grass[ci]-=eaten; d.e += eaten*DEER.gainPerGrass; }
+      // herd cohesion: drift toward the average of nearby deer
+      let hx=0, hy=0, hn=0;
+      for(const o of deer){ if(o===d) continue; const dx=o.x-d.x, dy=o.y-d.y, dd=dx*dx+dy*dy; if(dd<DEER.herd*DEER.herd){ hx+=o.x; hy+=o.y; hn++; } }
+      let dir;
+      if(hn && Math.random()<0.5){ dir=Math.atan2(hy/hn-d.y, hx/hn-d.x); }
+      else { // wander toward greener ground
+        dir=d.dir; let bestG=-1;
+        for(let a=0;a<5;a++){ const ang=rnd(0,6.28), sx=(d.x+Math.cos(ang)*3)|0, sy=(d.y+Math.sin(ang)*3)|0;
+          if(inBounds(sx,sy) && TERRAIN[terrain[idx(sx,sy)]].walk){ const g=grass[idx(sx,sy)]; if(g>bestG){bestG=g; dir=ang;} } }
+      }
+      moveCreature(d, dir+rnd(-0.4,0.4), DEER.speed);
+    }
+    d.e -= DEER.burn; d.age++;
+    if(d.e>DEER.repro/opts.breedRate && deer.length<DEER.cap){ d.e*=0.5; deer.push(makeDeer(d.x,d.y)); }
+    if(d.e<=0 || d.age>DEER.maxAge) deer.splice(i,1);
+  }
+
   // ---- Wolves ----
   for(let i=wolves.length-1;i>=0;i--){
     const w=wolves[i];
     const wv=WOLF.vision*(1+0.5*nightF)*opts.wolfAggr; // wolves see farther at night (and with aggression)
-    // hunt a vulnerable (non-fighting) human if one is closer than any rabbit, else hunt rabbits
-    let humanPrey=null, hb=wv*wv*0.5;
-    for(const h of humans){ if(ROLES[h.role].fights) continue; const d=(h.x-w.x)**2+(h.y-w.y)**2; if(d<hb){hb=d; humanPrey=h;} }
-    const prey=nearestRabbit(w.x,w.y,wv);
-    if(humanPrey && (!prey || hb < (prey.x-w.x)**2+(prey.y-w.y)**2)){
-      moveCreature(w, Math.atan2(humanPrey.y-w.y, humanPrey.x-w.x), WOLF.speed);
-      if((w.x-humanPrey.x)**2 + (w.y-humanPrey.y)**2 < 1.4){
-        w.e += WOLF.gain; bloodAt(humanPrey.x, humanPrey.y);
-        const hi=humans.indexOf(humanPrey); if(hi>=0) humans.splice(hi,1);
-      }
-    } else if(prey){
-      moveCreature(w, Math.atan2(prey.y-w.y, prey.x-w.x), WOLF.speed);
-      if((w.x-prey.x)**2 + (w.y-prey.y)**2 < 1.4){
-        w.e += WOLF.gain; bloodAt(prey.x, prey.y);
-        const pi=rabbits.indexOf(prey); if(pi>=0) rabbits.splice(pi,1);
+    // pick the closest of: a vulnerable human, a rabbit, or a deer
+    let target=null, tkind=null, tbd=Infinity;
+    for(const h of humans){ if(ROLES[h.role].fights) continue; const d=(h.x-w.x)**2+(h.y-w.y)**2; if(d<wv*wv*0.5 && d<tbd){tbd=d; target=h; tkind='human';} }
+    const rb=nearestRabbit(w.x,w.y,wv); if(rb){ const d=(rb.x-w.x)**2+(rb.y-w.y)**2; if(d<tbd){tbd=d; target=rb; tkind='rabbit';} }
+    const dr=nearestDeer(w.x,w.y,wv);   if(dr){ const d=(dr.x-w.x)**2+(dr.y-w.y)**2; if(d<tbd){tbd=d; target=dr; tkind='deer';} }
+    if(target){
+      moveCreature(w, Math.atan2(target.y-w.y, target.x-w.x), WOLF.speed);
+      if((w.x-target.x)**2 + (w.y-target.y)**2 < 1.4){
+        bloodAt(target.x, target.y);
+        if(tkind==='human'){ w.e += WOLF.gain; const hi=humans.indexOf(target); if(hi>=0) humans.splice(hi,1); }
+        else if(tkind==='rabbit'){ w.e += WOLF.gain; const pi=rabbits.indexOf(target); if(pi>=0) rabbits.splice(pi,1); }
+        else { w.e += DEER.gain; const di=deer.indexOf(target); if(di>=0) deer.splice(di,1); }
       }
     } else {
       moveCreature(w, w.dir+rnd(-0.5,0.5), WOLF.speed*0.7);
@@ -903,12 +971,19 @@ function step(){
       }
     }
 
-    // 4) hunters chase rabbits for meat
+    // 4) hunters chase game for meat — deer preferred (richer), else rabbits
     if(!acted && tb.hunts){
-      const prey=nearestRabbit(h.x, h.y, tb.vision);
+      const dPrey=nearestDeer(h.x, h.y, tb.vision), rPrey=nearestRabbit(h.x, h.y, tb.vision);
+      let prey=null, isDeer=false;
+      if(dPrey && (!rPrey || (dPrey.x-h.x)**2+(dPrey.y-h.y)**2 < (rPrey.x-h.x)**2+(rPrey.y-h.y)**2)){ prey=dPrey; isDeer=true; }
+      else if(rPrey){ prey=rPrey; }
       if(prey){
         moveCreature(h, Math.atan2(prey.y-h.y, prey.x-h.x), tb.speed);
-        if((h.x-prey.x)**2+(h.y-prey.y)**2 < 1.6){ const pi=rabbits.indexOf(prey); if(pi>=0) rabbits.splice(pi,1); h.e += HUMAN.meatGain; bloodAt(prey.x,prey.y); }
+        if((h.x-prey.x)**2+(h.y-prey.y)**2 < 1.6){
+          if(isDeer){ const di=deer.indexOf(prey); if(di>=0) deer.splice(di,1); h.e += HUMAN.meatGain*1.7; }
+          else { const pi=rabbits.indexOf(prey); if(pi>=0) rabbits.splice(pi,1); h.e += HUMAN.meatGain; }
+          bloodAt(prey.x,prey.y);
+        }
         acted=true;
       }
     }
@@ -969,12 +1044,54 @@ function step(){
     const p=randomLandCell(); if(p){ monsters.push(makeMonster(p.x,p.y)); logEvent('A monster emerged from the wilds', '#c0392b'); }
   }
 
+  // ---- Champions ---- named heroes who hunt monsters and lead their kingdom in war
+  for(let i=champions.length-1;i>=0;i--){
+    const ch=champions[i];
+    if(ch.dead){ champions.splice(i,1); continue; }
+    ch.age++;
+    const blaze=nearestLava(ch.x, ch.y, 4);
+    if(blaze){ moveCreature(ch, Math.atan2(ch.y-blaze.y, ch.x-blaze.x)+rnd(-0.3,0.3), CHAMP.speed*1.3); }
+    else {
+      const mon=nearestMonster(ch.x, ch.y, CHAMP.vision);
+      const foe = mon ? null : nearestEnemyHuman(ch, CHAMP.vision);
+      const tgt = mon || foe;
+      if(tgt){
+        moveCreature(ch, Math.atan2(tgt.y-ch.y, tgt.x-ch.x), CHAMP.speed);
+        if((ch.x-tgt.x)**2+(ch.y-tgt.y)**2 < 2.4){
+          if(mon){
+            mon.hp-=CHAMP.dmg; bloodAt(mon.x+rnd(-.5,.5), mon.y+rnd(-.5,.5));
+            if(mon.smashCd<=0){ ch.hp-=12; mon.smashCd=MONSTER.smashCd; }   // the brute lands a heavy blow
+            if(mon.hp<=0){ mon.dead=true; spark(mon.x,mon.y,'255,215,90',26,1.1,30,-0.01); logEvent(`${ch.name} the Champion slew a monster!`, '#ffd24a'); }
+          } else {
+            if(attackerWins(ch, foe)){ foe.dead=true; bloodAt(foe.x,foe.y); } else { ch.hp-=4; }
+          }
+        }
+      } else {
+        moveCreature(ch, ch.dir+rnd(-0.4,0.4), CHAMP.speed*0.7);   // patrol
+      }
+    }
+    if(ch.hp<=0){ logEvent(`${ch.name} the Champion has fallen`, '#e07a5a'); spark(ch.x,ch.y,'190,40,40',18,0.9,28,0.01); champions.splice(i,1); continue; }
+    if(ch.age>CHAMP.maxAge){ champions.splice(i,1); }
+  }
+  // a thriving kingdom (a keep or capital, no living champion) hails a new hero
+  if(tick%180===0 && houses.length){
+    const hasChamp=new Set(champions.map(c=>c.faction));
+    for(const h of houses){ if(h.dead) continue;
+      if((h.level>=2 || h.center) && !hasChamp.has(h.faction) && Math.random()<0.5){
+        champions.push(makeChampion(clamp(h.x+rnd(-1,1),0.5,cols-0.5), clamp(h.y+rnd(-1,1),0.5,rows-0.5), h.faction));
+        logEvent(`${factions[h.faction].name} hailed a champion`, '#ffe08a'); break;
+      }
+    }
+  }
+
   stepTowers();
 
   // consumed by lava (creatures, houses, towers caught in the molten flow)
   rabbits = rabbits.filter(r=> lava[idx(r.x|0, r.y|0)] < 0.25);
   wolves  = wolves.filter(w=> lava[idx(w.x|0, w.y|0)] < 0.25);
   humans  = humans.filter(h=> lava[idx(h.x|0, h.y|0)] < 0.25);
+  if(deer.length) deer = deer.filter(d=> lava[idx(d.x|0, d.y|0)] < 0.25);
+  if(champions.length) champions = champions.filter(c=> lava[idx(c.x|0, c.y|0)] < 0.25);
   if(monsters.length) monsters = monsters.filter(m=> lava[idx(m.x|0, m.y|0)] < 0.6); // brutes wade through it a touch longer
   const burnedHouse = houses.some(h=> lava[idx(h.x|0,h.y|0)] > 0.3);
   if(burnedHouse) houses = houses.filter(h=> lava[idx(h.x|0,h.y|0)] <= 0.3);
@@ -1133,6 +1250,13 @@ function render(){
   const ix=c=>(c.px+(c.x-c.px)*a)*cellPx, iy=c=>(c.py+(c.y-c.py)*a)*cellPx;
   ctx.fillStyle='#e6e0c8';
   for(const r of rabbits) ctx.fillRect(ix(r)-sz/2, iy(r)-sz/2, sz, sz);
+  // deer — tawny grazers, a little larger than rabbits, with tiny antlers
+  const dsz=Math.max(3, cellPx*1.3);
+  for(const d of deer){ const dx=ix(d), dy=iy(d);
+    ctx.fillStyle='#9c6b3f'; ctx.fillRect(dx-dsz/2, dy-dsz/2, dsz, dsz);
+    ctx.fillStyle='#c89a63'; ctx.fillRect(dx-dsz/2, dy-dsz/2, dsz, Math.max(1,dsz*0.35)); // lighter back
+    ctx.fillStyle='#5b3b22'; ctx.fillRect(dx-dsz*0.35, dy-dsz*0.8, Math.max(1,dsz*0.14), Math.max(1,dsz*0.4)); // antlers
+    ctx.fillRect(dx+dsz*0.2, dy-dsz*0.8, Math.max(1,dsz*0.14), Math.max(1,dsz*0.4)); }
   ctx.fillStyle='#3a3f4d';
   for(const w of wolves) ctx.fillRect(ix(w)-sz/2, iy(w)-sz/2, sz+1, sz+1);
   for(const h of humans){
@@ -1150,6 +1274,26 @@ function render(){
     if(opts.healthBars && m.hp<MONSTER.hp){ const f=clamp(m.hp/MONSTER.hp,0,1);   // health bar
       ctx.fillStyle='#000'; ctx.fillRect(mx-msz/2, my-msz/2-4, msz, 2);
       ctx.fillStyle='#5ad06a'; ctx.fillRect(mx-msz/2, my-msz/2-4, msz*f, 2); }
+  }
+  // champions — kingdom-coloured heroes wearing a gold crown, with a name & health bar
+  const csz=Math.max(3, cellPx*1.6);
+  for(const ch of champions){
+    const c=factions[ch.faction]?factions[ch.faction].color:[230,210,120], cx=ix(ch), cy=iy(ch);
+    ctx.fillStyle=`rgb(${c[0]},${c[1]},${c[2]})`; ctx.fillRect(cx-csz/2, cy-csz/2, csz, csz);
+    ctx.fillStyle='#ffd24a';                                   // crown
+    ctx.fillRect(cx-csz/2, cy-csz/2-Math.max(2,csz*0.3), csz, Math.max(1,csz*0.22));
+    ctx.fillRect(cx-csz/2, cy-csz/2-Math.max(3,csz*0.5), Math.max(1,csz*0.2), Math.max(1,csz*0.3));
+    ctx.fillRect(cx-Math.max(1,csz*0.1), cy-csz/2-Math.max(3,csz*0.5), Math.max(1,csz*0.2), Math.max(1,csz*0.3));
+    ctx.fillRect(cx+csz/2-Math.max(1,csz*0.2), cy-csz/2-Math.max(3,csz*0.5), Math.max(1,csz*0.2), Math.max(1,csz*0.3));
+    if(opts.healthBars && ch.hp<CHAMP.hp){ const f=clamp(ch.hp/CHAMP.hp,0,1);
+      ctx.fillStyle='#000'; ctx.fillRect(cx-csz/2, cy+csz/2+1, csz, 2);
+      ctx.fillStyle='#ffd24a'; ctx.fillRect(cx-csz/2, cy+csz/2+1, csz*f, 2); }
+    if(opts.eventLog && cam.zoom>=1.4){                        // name tag when zoomed in
+      ctx.font=`${Math.max(8, cellPx*1.1)}px "Segoe UI", system-ui, sans-serif`; ctx.textAlign='center'; ctx.textBaseline='bottom';
+      ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillText(ch.name, cx+1, cy-csz/2-Math.max(3,csz*0.5)+1);
+      ctx.fillStyle='#ffe9a8'; ctx.fillText(ch.name, cx, cy-csz/2-Math.max(3,csz*0.5));
+      ctx.textAlign='left';
+    }
   }
 
   // particles — blood, smoke, embers, debris (advanced every frame for smoothness)
@@ -1174,8 +1318,9 @@ function render(){
     f.life--; if(f.life<=0) flashes.splice(i,1);
   }
 
-  // day / night tint over the whole world (screen space)
+  // seasonal colour wash + day/night tint over the whole world (screen space)
   ctx.setTransform(1,0,0,1,0,0);
+  { const s=SEASONS[season]; ctx.fillStyle=`rgba(${s.tint[0]},${s.tint[1]},${s.tint[2]},${s.alpha})`; ctx.fillRect(0,0,W,H); }
   if(opts.dayNight && nightF>0.02){ ctx.fillStyle=`rgba(8,14,40,${(nightF*0.5).toFixed(3)})`; ctx.fillRect(0,0,W,H); }
 
   // dramatic event toasts (top-left)
@@ -1226,12 +1371,13 @@ function applyBrush(){
       grass[i]=TERRAIN[brushMode.value].grassCap*rnd(0.6,1);
     }
     removeDecorNear(cx,cy,R+0.5); // repainted ground loses its old trees/rocks
-  } else if(brushMode.type==='rabbit' || brushMode.type==='wolf'){
+  } else if(brushMode.type==='rabbit' || brushMode.type==='wolf' || brushMode.type==='deer'){
     const n=Math.max(1, (R*R)/18|0);
     for(let k=0;k<n;k++){
       const gx=cx+rnd(-R,R), gy=cy+rnd(-R,R);
       if(walkableAt(gx,gy)){
         if(brushMode.type==='rabbit') { if(rabbits.length<RABBIT.cap) rabbits.push(makeRabbit(gx,gy)); }
+        else if(brushMode.type==='deer') { if(deer.length<DEER.cap) deer.push(makeDeer(gx,gy)); }
         else { if(wolves.length<WOLF.cap) wolves.push(makeWolf(gx,gy)); }
       }
     }
@@ -1284,6 +1430,7 @@ function buildPalettes(){
   const rgb=c=>`rgb(${c[0]},${c[1]},${c[2]})`;
   const tools=[
     {type:'rabbit',  label:'Rabbit',  sw:'#e6e0c8'},
+    {type:'deer',    label:'Deer',    sw:'linear-gradient(#c89a63,#9c6b3f)'},
     {type:'wolf',    label:'Wolf',    sw:'#3a3f4d'},
     {type:'erase',   label:'Erase',   sw:'repeating-linear-gradient(45deg,#444,#444 3px,#222 3px,#222 6px)'},
     {type:'upgrade', label:'Upgrade', sw:'linear-gradient(#ffe08a,#caa15a)'},
@@ -1326,8 +1473,11 @@ function selectBrush(type,value,el){
 
 function updatePanel(){
   $('nRabbit').textContent=rabbits.length;
+  $('nDeer').textContent=deer.length;
   $('nWolf').textContent=wolves.length;
   $('nHuman').textContent=humans.length;
+  $('nChamp').textContent=champions.length;
+  $('season').textContent=SEASONS[season].name;
   $('nHouse').textContent=houses.length;
   $('nVillage').textContent=new Set(houses.map(h=>h.village)).size;
   $('nTower').textContent=towers.length;
@@ -1387,6 +1537,8 @@ function snapshot(){ // remember positions so render can interpolate toward the 
   for(const w of wolves){ w.px=w.x; w.py=w.y; }
   for(const h of humans){ h.px=h.x; h.py=h.y; }
   for(const m of monsters){ m.px=m.x; m.py=m.y; }
+  for(const d of deer){ d.px=d.x; d.py=d.y; }
+  for(const c of champions){ c.px=c.x; c.py=c.y; }
 }
 let frameCount=0, fpsLast=performance.now(), fpsAcc=0, fpsShown=0;
 function frame(now){
@@ -1529,6 +1681,7 @@ WORLD_SCALE=WORLD_SIZES[(+worldSizeEl.value)-1];
 bindGen('seaLevel','seaLevel',v=>v.toFixed(2));
 bindGen('initRabbits','initRabbits');
 bindGen('initWolves','initWolves');
+bindGen('initDeer','initDeer');
 bindGen('initKingdoms','initKingdoms');
 
 // ---- Quick actions ----
@@ -1554,7 +1707,7 @@ $('btnMeteorShower').addEventListener('click', ()=>{
   logEvent('A meteor storm rained down!', '#ffb066'); gridDirty=true;
 });
 $('btnClearLife').addEventListener('click', ()=>{
-  rabbits=[]; wolves=[]; monsters=[]; humans=[]; houses=[]; towers=[]; arrows=[]; villages=[]; vcolors=[]; vfaction=[]; factions=[]; nextVillage=1;
+  rabbits=[]; wolves=[]; monsters=[]; humans=[]; deer=[]; champions=[]; houses=[]; towers=[]; arrows=[]; villages=[]; vcolors=[]; vfaction=[]; factions=[]; relations={}; nextVillage=1;
   if(territory) territory.fill(0); logEvent('All life was wiped clean', '#e07a5a'); gridDirty=true;
 });
 $('btnDouse').addEventListener('click', ()=>{ if(lava) lava.fill(0); logEvent('The lava was doused', '#7bdcff'); gridDirty=true; });
